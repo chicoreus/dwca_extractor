@@ -145,6 +145,7 @@ public class DwCaExtractor {
 
     		if (archiveFilePath != null) { 
     			String filePath = archiveFilePath;
+    			logger.debug(filePath);
     			File file =  new File(filePath);
     			if (!file.exists()) { 
     				// Error
@@ -194,7 +195,6 @@ public class DwCaExtractor {
     			}
     			if (dwcArchive!=null) { 
     				if (checkArchive()) {
-
     					// Check output 
     					csvPrinter = new CSVPrinter(new FileWriter(outputFilename, append), CSVFormat.DEFAULT.withQuoteMode(QuoteMode.NON_NUMERIC));
     					// no exception thrown
@@ -204,8 +204,7 @@ public class DwCaExtractor {
     				System.out.println("Problem opening archive.");
     				logger.error("Unable to unpack archive file.");
     			}
-
-
+    			logger.debug(setupOK);
     		}
 
     	} catch( CmdLineException e ) {
@@ -309,7 +308,12 @@ public class DwCaExtractor {
     protected void extract() throws IOException {
 
     	List<String> targets = getTargetOccIDList();
+    	Iterator<String> ti = targets.iterator();
+    	while (ti.hasNext()) { 
+    	    logger.debug(ti.next());
+    	}
 
+    	// obtain the list of flat darwin core terms, excluding resource relationship and measurement or fact.
     	List<DwcTerm> flatTerms = DwcTerm.listByGroup(DwcTerm.GROUP_RECORD);
     	flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_OCCURRENCE));
     	flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_IDENTIFICATION));
@@ -324,10 +328,18 @@ public class DwCaExtractor {
     		// Write out header 
     		Iterator<DwcTerm> ih = flatTerms.iterator();
     		while (ih.hasNext()) { 
-    			String name = ih.next().simpleName();
-    			csvPrinter.print(name);
+    			DwcTerm term = ih.next();
+    			if (term.isClass()) {
+    				// remove the class level terms from the list of column headers
+    				flatTerms.remove(term);
+    			} else { 
+    				// write the simple name of the term as a column header
+    			   String name = term.simpleName();
+    		  	   csvPrinter.print(name);
+    			}
     		}
     		if (createExamples) { 
+    			// add additional terms to tie examples back to the sources they are copied from.
     			csvPrinter.print(DwcTerm.relatedResourceID);
     			csvPrinter.print(DwcTerm.relationshipOfResource);
     			csvPrinter.print(DwcTerm.relationshipRemarks);
@@ -344,10 +356,11 @@ public class DwCaExtractor {
     		logger.info(i.next().simpleName());
     	}
     	while (iterator.hasNext() && (extractedRecords < recordLimit || recordLimit==0)) {
-    		// read data, output record limit or selected record.
+    		// read data, output selected record.
     		StarRecord dwcrecord = iterator.next();
 
     		String occID = dwcrecord.core().value(DwcTerm.occurrenceID);
+    		logger.debug(occID);
 
     		if (targets.size()==0 || targets.contains(occID)) { 
 
@@ -360,42 +373,55 @@ public class DwCaExtractor {
     				if (key.equals(DwcTerm.occurrenceID.simpleName())) { 
     					sourceOccurrenceID = value;
     				}
-
+    				// write the value into the column
     				csvPrinter.print(value);
     			}
     			if (createExamples) { 
+    				// add empty values for the resource relationship terms
     				csvPrinter.print("");
     				csvPrinter.print("");
     				csvPrinter.print("");
+    				// end of line
     				csvPrinter.println();
 
+    				// output a line containing a copy of the record, with ID values overwritten for use 
+    				// as an example record (original values stored in resource relationship remarks).
     				Iterator<DwcTerm> itr = flatTerms.iterator();
+    				StringBuilder sourceValues = new StringBuilder().append("{");
     				while (itr.hasNext()) {
     					DwcTerm term = itr.next();
     					String key = term.simpleName();
     					String value = dwcrecord.core().value(term);
     					if (key.equals(DwcTerm.occurrenceID.simpleName())) { 
+    						sourceValues.append(key).append("=").append(value).append(" | ");
     						value = "urn:uuid:" + UUID.randomUUID().toString();
     					}
     					if (key.equals(DwcTerm.institutionCode.simpleName())) { 
+    						sourceValues.append(key).append("=").append(value).append(" | ");
     						value = "example.org";
     					}
     					if (key.equals(DwcTerm.institutionID.simpleName())) { 
+    						sourceValues.append(key).append("=").append(value).append(" | ");
     						value = "http://example.org/";
     					}
     					if (key.equals(DwcTerm.collectionCode.simpleName())) { 
+    						sourceValues.append(key).append("=").append(value).append(" | ");
     						value = "Example";
     					}
     					if (key.equals(DwcTerm.collectionID.simpleName())) {
+    						sourceValues.append(key).append("=").append(value).append(" | ");
     						value = "urn:uuid:1887c794-7291-4005-8eee-1afbe9d7814e";
     					}
     					csvPrinter.print(value);
     				}		
+    				sourceValues.append("}");
+    				// write the resource relationship colums pointing this record to its source.
     				csvPrinter.print(sourceOccurrenceID);
-    				csvPrinter.print("");
-    				StringBuffer remarks = new StringBuffer().append("Example record derived from ").append(sourceOccurrenceID);
+    				csvPrinter.print("source for example record");
+    				StringBuffer remarks = new StringBuffer().append("Example record derived from ").append(sourceOccurrenceID).append(" ");
+    				remarks.append(sourceValues.toString()).append(" ");
     				if (doi!=null && doi.length()>0) { 
-    					remarks.append(" in ").append(doi);
+    					remarks.append("in DOI=").append(doi);
     				}
     				csvPrinter.print(remarks.toString());
     			}
@@ -418,7 +444,7 @@ public class DwCaExtractor {
 			targetOccIDList = new ArrayList<String>();
 			if (targetOccurrenceIDs!=null && targetOccurrenceIDs.trim().length()>0) { 
 				if (targetOccurrenceIDs.contains("|")) { 
-					targetOccIDList.addAll(Arrays.asList(targetOccurrenceIDs.split("|")));
+					targetOccIDList.addAll(Arrays.asList(targetOccurrenceIDs.split("\\|")));
 				} else { 
 					targetOccIDList.add(targetOccurrenceIDs);
 				}
