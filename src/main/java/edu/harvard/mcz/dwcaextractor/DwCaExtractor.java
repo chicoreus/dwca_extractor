@@ -27,6 +27,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.Reader;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
@@ -61,14 +62,20 @@ public class DwCaExtractor {
 	
 	private static final Log logger = LogFactory.getLog(DwCaExtractor.class);
 
+    @Option(name="-i",usage="input Darwin Core Archive file",required=true,aliases="--input")
+    private String archiveFilePath = "dwca.zip";
+    
     @Option(name="-o",usage="output csv file",aliases="--output")
     private String outputFilename = "output.csv";
     
-    @Option(name="-l",usage="maximum number of records to read",aliases="--limit")
+    @Option(name="-a",usage="append to the output csv file instead of overwriting",aliases="--append")
+    private boolean append = false;
+    
+    @Option(name="-l",usage="maximum number of records to read",aliases="--limit",forbids="-c")
     private int recordLimit = 0; // maximum records to read, zero or less for no limit.
     
-    @Option(name="-i",usage="input Darwin Core Archive file",required=true,aliases="--input")
-    private String archiveFilePath = "dwca.zip";
+    @Option(name="-c",usage="Cherry pick only particular occurrence records (pipe delimited list of occurrenceIds) ",aliases="--cherry-pick")
+    private String targetOccurrenceIDs = "";
     
     @Option(name="-d",usage="DOI for the source dataset",aliases="--doi")
     private String doi = "";
@@ -76,7 +83,12 @@ public class DwCaExtractor {
     @Option(name="-e",usage="Duplicate records into example records with newly minted uuid occurrenceId ",aliases="--create-example-copies")
     private boolean createExamples = false;
     
-    private int cValidRecords = 0;  // number of records read.
+    @Option(name="-h",usage="Display this help message. ",aliases="--help")
+    private boolean help = false;
+    
+    ArrayList<String> targetOccIDList = null;
+    
+    private int extractedRecords = 0;  // number of records read.
 
     public Archive dwcArchive = null;
     public CSVPrinter csvPrinter = null;
@@ -84,121 +96,131 @@ public class DwCaExtractor {
     public String recordClass = null;
     public String[] headers = new String[]{};
 
-    /**
-     * Report reading records in this increment. 
-     */
-    private int reportSize = 1000;
+    //private int reportSize = 1000;
     
     Iterator<StarRecord> iterator;
 
     long start;	    
-	
-	public static void main(String[] args) {
-		
-		DwCaExtractor extractor = new DwCaExtractor();
-		if (extractor.setup(args)) { 
-			try {
-				extractor.extract();
-			} catch (IOException e) {
-				logger.error(e.getMessage(),e);
-			}
-		}
-	} 
-	
-	public DwCaExtractor() {
-	}
-		
-	/**
-	 * Setup conditions to run.
-	 * 
-	 * @param args command line arguments
-	 * @return true if setup was successful, false otherwise.
-	 */
-	protected boolean setup(String[] args) {
-		boolean setupOK = false;
-		CmdLineParser parser = new CmdLineParser(this);
-		parser.setUsageWidth(4096);
-		try {
-			parser.parseArgument(args);	
 
-			if (archiveFilePath != null) { 
-				String filePath = archiveFilePath;
-				File file =  new File(filePath);
-				if (!file.exists()) { 
-					// Error
-					logger.error(filePath + " not found.");
-				}
-				if (!file.canRead()) { 
-					// error
-					logger.error("Unable to read " + filePath);
-				}
-				if (file.isDirectory()) { 
-					// check if it is an unzipped dwc archive.
-					dwcArchive = openArchive(file);
-				}
-				if (file.isFile()) { 
-					// unzip it
-					File outputDirectory = new File(file.getName().replace(".", "_") + "_content");
-					if (!outputDirectory.exists()) {
-						outputDirectory.mkdir();
-						try {
-							byte[] buffer = new byte[1024];
-							ZipInputStream inzip = new ZipInputStream(new FileInputStream(file));
-							ZipEntry entry =  inzip.getNextEntry();
-							while (entry!=null) { 
-								String fileName = entry.getName();
-								File expandedFile = new File(outputDirectory.getPath() + File.separator + fileName);
-								new File(expandedFile.getParent()).mkdirs();
-								FileOutputStream expandedfileOutputStream = new FileOutputStream(expandedFile);             
-								int len;
-								while ((len = inzip.read(buffer)) > 0) {
-									expandedfileOutputStream.write(buffer, 0, len);
-								}
+    public static void main(String[] args) {
 
-								expandedfileOutputStream.close();   
-								entry = inzip.getNextEntry();							
-							}
-							inzip.closeEntry();
-							inzip.close();
-							System.out.println("Unzipped archive into " + outputDirectory.getPath());
-						} catch (FileNotFoundException e) {
-							logger.error(e.getMessage());
-							e.printStackTrace();
-						} catch (IOException e) {
-							logger.error(e.getMessage());
-							// TODO Auto-generated catch block
-							e.printStackTrace();
-						}
-					}
-					// look into the unzipped directory
-					dwcArchive = openArchive(outputDirectory);
-				}
-				if (dwcArchive!=null) { 
-					if (checkArchive()) {
-						
-						// Check output 
-						csvPrinter = new CSVPrinter(new FileWriter(outputFilename, true), CSVFormat.DEFAULT.withQuoteMode(QuoteMode.NON_NUMERIC));
-						// no exception thrown
-						setupOK = true;
-					}
-				} else { 
-					System.out.println("Problem opening archive.");
-				}
-				
-				
-			}
+    	int exitState = 0;
+    	
+    	DwCaExtractor extractor = new DwCaExtractor();
+    	if (extractor.setup(args)) { 
+    		try {
+    			extractor.extract();
+    		} catch (IOException e) {
+    			logger.error(e.getMessage(),e);
+    			exitState = 2;
+    		}
+    	} else { 
+    		logger.error("Failed to setup for extraction.");
+    		exitState = 1;
+    	}
+    	
+    	System.exit(exitState);
+    } 
 
-		} catch( CmdLineException e ) {
-			System.err.println(e.getMessage());
-			parser.printUsage(System.err);
-		} catch (IOException e) {
-			System.err.println(e.getMessage());
-			parser.printUsage(System.err);
-		}
-		return setupOK;
-	}
+    public DwCaExtractor() {
+    }
 
-	    
+    /**
+     * Setup conditions to run.
+     * 
+     * @param args command line arguments
+     * @return true if setup was successful, false otherwise.
+     */
+    protected boolean setup(String[] args) {
+    	boolean setupOK = false;
+    	CmdLineParser parser = new CmdLineParser(this);
+    	//parser.setUsageWidth(4096);
+    	try {
+    		parser.parseArgument(args);
+    		
+    		if (help) { 
+    			parser.printUsage(System.out);
+    			System.exit(0);
+    		}
+
+    		if (archiveFilePath != null) { 
+    			String filePath = archiveFilePath;
+    			File file =  new File(filePath);
+    			if (!file.exists()) { 
+    				// Error
+    				logger.error(filePath + " not found.");
+    			}
+    			if (!file.canRead()) { 
+    				// error
+    				logger.error("Unable to read " + filePath);
+    			}
+    			if (file.isDirectory()) { 
+    				// check if it is an unzipped dwc archive.
+    				dwcArchive = openArchive(file);
+    			}
+    			if (file.isFile()) { 
+    				// unzip it
+    				File outputDirectory = new File(file.getName().replace(".", "_") + "_content");
+    				if (!outputDirectory.exists()) {
+    					outputDirectory.mkdir();
+    					try {
+    						byte[] buffer = new byte[1024];
+    						ZipInputStream inzip = new ZipInputStream(new FileInputStream(file));
+    						ZipEntry entry =  inzip.getNextEntry();
+    						while (entry!=null) { 
+    							String fileName = entry.getName();
+    							File expandedFile = new File(outputDirectory.getPath() + File.separator + fileName);
+    							new File(expandedFile.getParent()).mkdirs();
+    							FileOutputStream expandedfileOutputStream = new FileOutputStream(expandedFile);             
+    							int len;
+    							while ((len = inzip.read(buffer)) > 0) {
+    								expandedfileOutputStream.write(buffer, 0, len);
+    							}
+
+    							expandedfileOutputStream.close();   
+    							entry = inzip.getNextEntry();							
+    						}
+    						inzip.closeEntry();
+    						inzip.close();
+    						System.out.println("Unzipped archive into " + outputDirectory.getPath());
+    					} catch (FileNotFoundException e) {
+    						logger.error(e.getMessage());
+    						e.printStackTrace();
+    					} catch (IOException e) {
+    						logger.error(e.getMessage());
+    						// TODO Auto-generated catch block
+    						e.printStackTrace();
+    					}
+    				}
+    				// look into the unzipped directory
+    				dwcArchive = openArchive(outputDirectory);
+    			}
+    			if (dwcArchive!=null) { 
+    				if (checkArchive()) {
+
+    					// Check output 
+    					csvPrinter = new CSVPrinter(new FileWriter(outputFilename, append), CSVFormat.DEFAULT.withQuoteMode(QuoteMode.NON_NUMERIC));
+    					// no exception thrown
+    					setupOK = true;
+    				}
+    			} else { 
+    				System.out.println("Problem opening archive.");
+    			}
+
+
+    		}
+
+    	} catch( CmdLineException e ) {
+    		System.err.println(e.getMessage());
+    		parser.printUsage(System.err);
+    	} catch (IOException e) {
+    		System.err.println(e.getMessage());
+    		parser.printUsage(System.err);
+    	}
+    	return setupOK;
+    }
+
+
     /**
      * Attempt to open a DarwinCore archive directory and return it as an Archive object.  
      * If an UnsupportedArchiveException is thrown, trys again harder by looking for an archive
@@ -238,141 +260,176 @@ public class DwCaExtractor {
     	}
     	return result;
     }
-    
+
     protected boolean checkArchive() {
     	boolean result = false;
     	if (dwcArchive==null) { 
     		return result;
     	}
-	    if (dwcArchive.getCore() == null) {
-		      System.out.println("Cannot locate the core datafile in " + dwcArchive.getLocation().getPath());
-		      return result;
-		}
-		System.out.println("Core file found: " + dwcArchive.getCore().getLocations());
-		System.out.println("Core row type: " + dwcArchive.getCore().getRowType());
-		if (dwcArchive.getCore().getRowType().equals(DwcTerm.Occurrence) ) {
-			
-			// check expectations 
-		    List<DwcTerm> expectedTerms = new ArrayList<DwcTerm>();
-		    expectedTerms.add(DwcTerm.scientificName);
-		    expectedTerms.add(DwcTerm.scientificNameAuthorship);
-		    expectedTerms.add(DwcTerm.eventDate);
-		    expectedTerms.add(DwcTerm.recordedBy);
-		    expectedTerms.add(DwcTerm.decimalLatitude);
-		    expectedTerms.add(DwcTerm.decimalLongitude);
-		    expectedTerms.add(DwcTerm.locality);
-		    expectedTerms.add(DwcTerm.basisOfRecord);
-		    expectedTerms.add(DwcTerm.occurrenceID);
-		    
-		    for (DwcTerm term : expectedTerms) {
-		      if (!dwcArchive.getCore().hasTerm(term)) {
-		        System.out.println("Cannot find " + term + " in core of input dataset.");
-		      }
-		    } 		
-		    
-		    result = true;
-		} else { 
-			// currently can only process occurrence core
-		}
+    	if (dwcArchive.getCore() == null) {
+    		System.out.println("Cannot locate the core datafile in " + dwcArchive.getLocation().getPath());
+    		return result;
+    	}
+    	System.out.println("Core file found: " + dwcArchive.getCore().getLocations());
+    	System.out.println("Core row type: " + dwcArchive.getCore().getRowType());
+    	logger.debug(dwcArchive.getCore().getRowType().simpleName());
+    	if (dwcArchive.getCore().getRowType().equals(DwcTerm.Occurrence) ) {
 
-        return result;
+    		// check expectations 
+    		List<DwcTerm> expectedTerms = new ArrayList<DwcTerm>();
+    		expectedTerms.add(DwcTerm.scientificName);
+    		expectedTerms.add(DwcTerm.scientificNameAuthorship);
+    		expectedTerms.add(DwcTerm.eventDate);
+    		expectedTerms.add(DwcTerm.recordedBy);
+    		expectedTerms.add(DwcTerm.decimalLatitude);
+    		expectedTerms.add(DwcTerm.decimalLongitude);
+    		expectedTerms.add(DwcTerm.locality);
+    		expectedTerms.add(DwcTerm.basisOfRecord);
+    		expectedTerms.add(DwcTerm.occurrenceID);
+
+    		for (DwcTerm term : expectedTerms) {
+    			if (!dwcArchive.getCore().hasTerm(term)) {
+    				logger.debug("Cannot find " + term + " in core of input dataset.");
+    			}
+    		} 		
+
+    		result = true;
+    	} else {
+    		logger.error("Darwin Core Archive does not have an Occurrence core.");
+    		// currently can only process occurrence core
+    	}
+
+    	return result;
     }
-    
+
     /**
-	 * @return the reportSize (send count of number of records read
-	 * to the console at this increment of number of records read)
-	 */
-	public int getReportSize() {
-		return reportSize;
+     * Assuming setup succeeded, extract data from input file as indicated by command line parameters.
+     * 
+     * @throws IOException
+     */
+    protected void extract() throws IOException {
+
+    	List<String> targets = getTargetOccIDList();
+
+    	List<DwcTerm> flatTerms = DwcTerm.listByGroup(DwcTerm.GROUP_RECORD);
+    	flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_OCCURRENCE));
+    	flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_IDENTIFICATION));
+    	flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_LOCATION));
+    	flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_EVENT));
+    	flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_GEOLOGICALCONTEXT));
+    	flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_TAXON));
+    	flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_MATERIAL_SAMPLE));
+    	flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_ORGANISM));
+
+    	if (!append) { 
+    		// Write out header 
+    		Iterator<DwcTerm> ih = flatTerms.iterator();
+    		while (ih.hasNext()) { 
+    			String name = ih.next().simpleName();
+    			csvPrinter.print(name);
+    		}
+    		if (createExamples) { 
+    			csvPrinter.print(DwcTerm.relatedResourceID);
+    			csvPrinter.print(DwcTerm.relationshipOfResource);
+    			csvPrinter.print(DwcTerm.relationshipRemarks);
+    		}
+
+    		csvPrinter.println();
+    		csvPrinter.flush();
+    	} 
+
+    	Iterator<StarRecord> iterator = dwcArchive.iterator();
+    	Set<Term> terms = dwcArchive.getCore().getTerms();
+    	Iterator<Term> i = terms.iterator();
+    	while (i.hasNext()) { 
+    		logger.info(i.next().simpleName());
+    	}
+    	while (iterator.hasNext() && (extractedRecords < recordLimit || recordLimit==0)) {
+    		// read data, output record limit or selected record.
+    		StarRecord dwcrecord = iterator.next();
+
+    		String occID = dwcrecord.core().value(DwcTerm.occurrenceID);
+
+    		if (targets.size()==0 || targets.contains(occID)) { 
+
+    			Iterator<DwcTerm> it = flatTerms.iterator();
+    			String sourceOccurrenceID = null;
+    			while (it.hasNext()) {
+    				DwcTerm term = it.next();
+    				String key = term.simpleName();
+    				String value = dwcrecord.core().value(term);
+    				if (key.equals(DwcTerm.occurrenceID.simpleName())) { 
+    					sourceOccurrenceID = value;
+    				}
+
+    				csvPrinter.print(value);
+    			}
+    			if (createExamples) { 
+    				csvPrinter.print("");
+    				csvPrinter.print("");
+    				csvPrinter.print("");
+    				csvPrinter.println();
+
+    				Iterator<DwcTerm> itr = flatTerms.iterator();
+    				while (itr.hasNext()) {
+    					DwcTerm term = itr.next();
+    					String key = term.simpleName();
+    					String value = dwcrecord.core().value(term);
+    					if (key.equals(DwcTerm.occurrenceID.simpleName())) { 
+    						value = UUID.randomUUID().toString();
+    					}
+    					if (key.equals(DwcTerm.institutionCode.simpleName())) { 
+    						value = "example.org";
+    					}
+    					if (key.equals(DwcTerm.institutionID.simpleName())) { 
+    						value = "http://example.org/";
+    					}
+    					if (key.equals(DwcTerm.collectionCode.simpleName())) { 
+    						value = "Example";
+    					}
+    					if (key.equals(DwcTerm.collectionID.simpleName())) {
+    						value = "urn:uuid:1887c794-7291-4005-8eee-1afbe9d7814e";
+    					}
+    					csvPrinter.print(value);
+    				}		
+    				csvPrinter.print(sourceOccurrenceID);
+    				csvPrinter.print("");
+    				StringBuffer remarks = new StringBuffer().append("Example record derived from ").append(sourceOccurrenceID);
+    				if (doi!=null && doi.length()>0) { 
+    					remarks.append(" in ").append(doi);
+    				}
+    				csvPrinter.print(remarks.toString());
+    			}
+    			csvPrinter.println();
+    			csvPrinter.flush();
+
+    			extractedRecords++;
+    		}
+
+
+    	}	
+    	csvPrinter.close();
+
+    	System.out.println("Extracted " + extractedRecords + " flat Darwin Core occurrence records");
+
 	}
-
-	/**
-	 * @param reportSize the reportSize to set
-	 */
-	public void setReportSize(int chunkSize) {
-		this.reportSize = chunkSize;
-	}  
-		
-	protected void extract() throws IOException {
-			
-		List<DwcTerm> flatTerms = DwcTerm.listByGroup(DwcTerm.GROUP_RECORD);
-		flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_OCCURRENCE));
-		flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_IDENTIFICATION));
-		flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_LOCATION));
-		flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_EVENT));
-		flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_GEOLOGICALCONTEXT));
-		flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_TAXON));
-		flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_MATERIAL_SAMPLE));
-		flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_ORGANISM));
-		
-		// Write out header 
-		Iterator<DwcTerm> ih = flatTerms.iterator();
-		while (ih.hasNext()) { 
-			String name = ih.next().simpleName();
-			csvPrinter.print(name);
-		}
-		if (createExamples) { 
-			csvPrinter.print(DwcTerm.relatedResourceID);
-			csvPrinter.print(DwcTerm.relationshipOfResource);
-			csvPrinter.print(DwcTerm.relationshipRemarks);
-		}
-		
-		csvPrinter.println();
-		csvPrinter.flush();
-		
-	    Iterator<StarRecord> iterator = dwcArchive.iterator();
-		Set<Term> terms = dwcArchive.getCore().getTerms();
-		Iterator<Term> i = terms.iterator();
-		while (i.hasNext()) { 
-			System.out.println(i.next().simpleName());
-		}
-	    while (iterator.hasNext() && (cValidRecords < recordLimit || recordLimit==0)) {
-			// read initial set of rows, pass downstream
-			StarRecord dwcrecord = iterator.next();
-
-			Iterator<DwcTerm> it = flatTerms.iterator();
-			String sourceOccurrenceID = null;
-			while (it.hasNext()) {
-				DwcTerm term = it.next();
-				String key = term.simpleName();
-			    String value = dwcrecord.core().value(term);
-			    if (key.equals(DwcTerm.occurrenceID.simpleName())) { 
-			    	sourceOccurrenceID = value;
-			    }
-			    
-			    csvPrinter.print(value);
-            }
-			if (createExamples) { 
-				csvPrinter.print("");
-				csvPrinter.print("");
-				csvPrinter.print("");
-                csvPrinter.println();
-                
-				Iterator<DwcTerm> itr = flatTerms.iterator();
-				while (itr.hasNext()) {
-					DwcTerm term = itr.next();
-					String key = term.simpleName();
-				    String value = dwcrecord.core().value(term);
-				    if (key.equals(DwcTerm.occurrenceID.simpleName())) { 
-				    	value = UUID.randomUUID().toString();
-				    }
-				    csvPrinter.print(value);
-	            }		
-				csvPrinter.print(sourceOccurrenceID);
-				csvPrinter.print("");
-				csvPrinter.print("Modified from " + sourceOccurrenceID + " in ");				
-			}
-            csvPrinter.println();
-            csvPrinter.flush();
-			
-			cValidRecords++;
-			
-		}	
-	    csvPrinter.close();
 	
-		System.out.println("Read " + reportSize + " records, total " + cValidRecords);
-			
-
+	protected List<String> getTargetOccIDList() { 
+		if (targetOccIDList==null) { 
+			targetOccIDList = new ArrayList<String>();
+			if (targetOccurrenceIDs!=null && targetOccurrenceIDs.trim().length()>0) { 
+				if (targetOccurrenceIDs.contains("|")) { 
+					targetOccIDList.addAll(Arrays.asList(targetOccurrenceIDs.split("|")));
+				} else { 
+					targetOccIDList.add(targetOccurrenceIDs);
+				}
+			}
+			while (targetOccIDList.contains("")) { 
+				targetOccIDList.remove("");
+			}
+		}
+		
+		return targetOccIDList;
 	}
 	
 }
