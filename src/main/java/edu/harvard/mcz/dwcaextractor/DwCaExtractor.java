@@ -182,14 +182,11 @@ public class DwCaExtractor {
     						}
     						inzip.closeEntry();
     						inzip.close();
-    						System.out.println("Unzipped archive into " + outputDirectory.getPath());
+    						logger.debug("Unzipped archive into " + outputDirectory.getPath());
     					} catch (FileNotFoundException e) {
     						logger.error(e.getMessage());
-    						e.printStackTrace();
     					} catch (IOException e) {
-    						logger.error(e.getMessage());
-    						// TODO Auto-generated catch block
-    						e.printStackTrace();
+    						logger.error(e.getMessage(),e);
     					}
     				}
     				// look into the unzipped directory
@@ -205,16 +202,18 @@ public class DwCaExtractor {
     				}
     			} else { 
     				System.out.println("Problem opening archive.");
+    				logger.error("Unable to unpack archive file.");
     			}
 
 
     		}
 
     	} catch( CmdLineException e ) {
-    		System.err.println(e.getMessage());
+    		logger.error(e.getMessage());
     		parser.printUsage(System.err);
     	} catch (IOException e) {
-    		System.err.println(e.getMessage());
+    		logger.error(e.getMessage());
+    		System.out.println(e.getMessage());
     		parser.printUsage(System.err);
     	}
     	return setupOK;
@@ -270,8 +269,8 @@ public class DwCaExtractor {
     		System.out.println("Cannot locate the core datafile in " + dwcArchive.getLocation().getPath());
     		return result;
     	}
-    	System.out.println("Core file found: " + dwcArchive.getCore().getLocations());
-    	System.out.println("Core row type: " + dwcArchive.getCore().getRowType());
+    	logger.debug("Core file found: " + dwcArchive.getCore().getLocations());
+    	logger.debug("Core row type: " + dwcArchive.getCore().getRowType());
     	logger.debug(dwcArchive.getCore().getRowType().simpleName());
     	if (dwcArchive.getCore().getRowType().equals(DwcTerm.Occurrence) ) {
 
@@ -376,7 +375,7 @@ public class DwCaExtractor {
     					String key = term.simpleName();
     					String value = dwcrecord.core().value(term);
     					if (key.equals(DwcTerm.occurrenceID.simpleName())) { 
-    						value = UUID.randomUUID().toString();
+    						value = "urn:uuid:" + UUID.randomUUID().toString();
     					}
     					if (key.equals(DwcTerm.institutionCode.simpleName())) { 
     						value = "example.org";
