@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -49,7 +50,9 @@ import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
 
 /**
- * Read occurrence data from DarwinCore Archive files.
+ * Read occurrence data from DarwinCore Archive files, write out as flat darwin core csv.
+ * 
+ * Optionally duplicate records as example data.
  * 
  * @author mole
  *
@@ -69,6 +72,9 @@ public class DwCaExtractor {
     
     @Option(name="-d",usage="DOI for the source dataset",aliases="--doi")
     private String doi = "";
+    
+    @Option(name="-e",usage="Duplicate records into example records with newly minted uuid occurrenceId ",aliases="--create-example-copies")
+    private boolean createExamples = false;
     
     private int cValidRecords = 0;  // number of records read.
 
@@ -299,10 +305,16 @@ public class DwCaExtractor {
 		flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_MATERIAL_SAMPLE));
 		flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_ORGANISM));
 		
+		// Write out header 
 		Iterator<DwcTerm> ih = flatTerms.iterator();
 		while (ih.hasNext()) { 
 			String name = ih.next().simpleName();
 			csvPrinter.print(name);
+		}
+		if (createExamples) { 
+			csvPrinter.print(DwcTerm.relatedResourceID);
+			csvPrinter.print(DwcTerm.relationshipOfResource);
+			csvPrinter.print(DwcTerm.relationshipRemarks);
 		}
 		
 		csvPrinter.println();
@@ -319,17 +331,42 @@ public class DwCaExtractor {
 			StarRecord dwcrecord = iterator.next();
 
 			Iterator<DwcTerm> it = flatTerms.iterator();
+			String sourceOccurrenceID = null;
 			while (it.hasNext()) {
 				DwcTerm term = it.next();
 				String key = term.simpleName();
 			    String value = dwcrecord.core().value(term);
+			    if (key.equals(DwcTerm.occurrenceID.simpleName())) { 
+			    	sourceOccurrenceID = value;
+			    }
 			    
 			    csvPrinter.print(value);
             }
+			if (createExamples) { 
+				csvPrinter.print("");
+				csvPrinter.print("");
+				csvPrinter.print("");
+                csvPrinter.println();
+                
+				Iterator<DwcTerm> itr = flatTerms.iterator();
+				while (itr.hasNext()) {
+					DwcTerm term = itr.next();
+					String key = term.simpleName();
+				    String value = dwcrecord.core().value(term);
+				    if (key.equals(DwcTerm.occurrenceID.simpleName())) { 
+				    	value = UUID.randomUUID().toString();
+				    }
+				    csvPrinter.print(value);
+	            }		
+				csvPrinter.print(sourceOccurrenceID);
+				csvPrinter.print("");
+				csvPrinter.print("Modified from " + sourceOccurrenceID + " in ");				
+			}
             csvPrinter.println();
             csvPrinter.flush();
 			
 			cValidRecords++;
+			
 		}	
 	    csvPrinter.close();
 	
