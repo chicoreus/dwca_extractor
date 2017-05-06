@@ -323,19 +323,25 @@ public class DwCaExtractor {
     	flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_TAXON));
     	flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_MATERIAL_SAMPLE));
     	flatTerms.addAll(DwcTerm.listByGroup(DwcTerm.GROUP_ORGANISM));
+    	flatTerms.remove(DwcTerm.Occurrence);
+    	flatTerms.remove(DwcTerm.Identification);
+    	flatTerms.remove(DwcTerm.Event);
+    	flatTerms.remove(DwcTerm.GeologicalContext);
+    	flatTerms.remove(DwcTerm.Taxon);
+    	flatTerms.remove(DwcTerm.MaterialSample);
+    	flatTerms.remove(DwcTerm.Organism);
 
     	if (!append) { 
     		// Write out header 
     		Iterator<DwcTerm> ih = flatTerms.iterator();
     		while (ih.hasNext()) { 
     			DwcTerm term = ih.next();
-    			if (term.isClass()) {
-    				// remove the class level terms from the list of column headers
-    				flatTerms.remove(term);
-    			} else { 
+    			if (!term.isClass()) {
     				// write the simple name of the term as a column header
     			   String name = term.simpleName();
     		  	   csvPrinter.print(name);
+    			} else { 
+    				logger.error(term.simpleName());
     			}
     		}
     		if (createExamples) { 
