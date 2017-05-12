@@ -30,6 +30,6 @@ Visit: http://www.gbif.org/dataset/b9f90d91-53c5-4c0f-b950-5678a7ecd571, downloa
 
    java -jar dwca_extractor-0.0.1-SNAPSHOT-jar-with-dependencies.jar -i dwca-foram-horten-v1.1.zip -l 1 -o output.csv -e -d  http://doi.org/10.15468/pvkoqy  
 
-This will extract the first record from the archive (-l 1), create a duplicate example copy (-e) assert the doi of the source data set in the example record (-d doi), and save the extracted record and example record to output.csv.
+This will extract the first record from the archive (-l 1), create a duplicate example copy (-e) assert the doi of the source data set in the example record and as the dwc:datasetID of the extracted record (-d doi), and save the extracted record and example record to output.csv.
 
 

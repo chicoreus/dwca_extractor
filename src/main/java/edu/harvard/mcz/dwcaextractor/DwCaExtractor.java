@@ -377,8 +377,18 @@ public class DwCaExtractor {
     				String key = term.simpleName();
     				String value = dwcrecord.core().value(term);
     				if (key.equals(DwcTerm.occurrenceID.simpleName())) { 
+    					// store a copy of the original occurrenceID
     					sourceOccurrenceID = value;
     				}
+    				// if a doi was provided, stamp it into datasetID if none was provided.
+    				if (key.equals(DwcTerm.datasetID.simpleName())) { 
+    					if (value==null || value.trim().length()==0) { 
+    	    				if (doi!=null && doi.length()>0) { 
+    	    					value = doi;
+    	    				}
+    					}
+    				}
+    				
     				// write the value into the column
     				csvPrinter.print(value);
     			}
@@ -412,7 +422,7 @@ public class DwCaExtractor {
     					}
     					if (key.equals(DwcTerm.collectionCode.simpleName())) { 
     						sourceValues.append(key).append("=").append(value).append(" | ");
-    						value = "Example";
+    						value = "Modified Example";
     					}
     					if (key.equals(DwcTerm.collectionID.simpleName())) {
     						sourceValues.append(key).append("=").append(value).append(" | ");
@@ -423,7 +433,7 @@ public class DwCaExtractor {
     				sourceValues.append("}");
     				// write the resource relationship colums pointing this record to its source.
     				csvPrinter.print(sourceOccurrenceID);
-    				csvPrinter.print("source for example record");
+    				csvPrinter.print("source for modified example record");
     				StringBuffer remarks = new StringBuffer().append("Example record derived from ").append(sourceOccurrenceID).append(" ");
     				remarks.append(sourceValues.toString()).append(" ");
     				if (doi!=null && doi.length()>0) { 
