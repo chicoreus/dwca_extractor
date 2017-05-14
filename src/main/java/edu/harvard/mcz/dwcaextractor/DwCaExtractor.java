@@ -28,8 +28,10 @@ import java.io.IOException;
 import java.io.Reader;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.zip.ZipEntry;
@@ -49,6 +51,9 @@ import org.gbif.dwc.text.UnsupportedArchiveException;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
+
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 
 /**
  * Read occurrence data from DarwinCore Archive files, write out as flat darwin core csv.
@@ -306,6 +311,8 @@ public class DwCaExtractor {
      * @throws IOException
      */
     protected void extract() throws IOException {
+    	
+    	Gson gson = new Gson();
 
     	List<String> targets = getTargetOccIDList();
     	Iterator<String> ti = targets.iterator();
@@ -402,6 +409,7 @@ public class DwCaExtractor {
 
     				// output a line containing a copy of the record, with ID values overwritten for use 
     				// as an example record (original values stored in resource relationship remarks).
+    				Map<String,String>  metadataMap = new HashMap<String,String>();
     				Iterator<DwcTerm> itr = flatTerms.iterator();
     				StringBuilder sourceValues = new StringBuilder().append("{");
     				while (itr.hasNext()) {
@@ -411,22 +419,27 @@ public class DwCaExtractor {
     					if (key.equals(DwcTerm.occurrenceID.simpleName())) { 
     						sourceValues.append(key).append("=").append(value).append(" | ");
     						value = "urn:uuid:" + UUID.randomUUID().toString();
+    						metadataMap.put(key, value);
     					}
     					if (key.equals(DwcTerm.institutionCode.simpleName())) { 
     						sourceValues.append(key).append("=").append(value).append(" | ");
     						value = "example.org";
+    						metadataMap.put(key, value);
     					}
     					if (key.equals(DwcTerm.institutionID.simpleName())) { 
     						sourceValues.append(key).append("=").append(value).append(" | ");
     						value = "http://example.org/";
+    						metadataMap.put(key, value);
     					}
     					if (key.equals(DwcTerm.collectionCode.simpleName())) { 
     						sourceValues.append(key).append("=").append(value).append(" | ");
     						value = "Modified Example";
+    						metadataMap.put(key, value);
     					}
     					if (key.equals(DwcTerm.collectionID.simpleName())) {
     						sourceValues.append(key).append("=").append(value).append(" | ");
     						value = "urn:uuid:1887c794-7291-4005-8eee-1afbe9d7814e";
+    						metadataMap.put(key, value);
     					}
     					csvPrinter.print(value);
     				}		
@@ -434,12 +447,17 @@ public class DwCaExtractor {
     				// write the resource relationship colums pointing this record to its source.
     				csvPrinter.print(sourceOccurrenceID);
     				csvPrinter.print("source for modified example record");
+    				metadataMap.put("sourceOccurrenceID", sourceOccurrenceID);
     				StringBuffer remarks = new StringBuffer().append("Example record derived from ").append(sourceOccurrenceID).append(" ");
     				remarks.append(sourceValues.toString()).append(" ");
     				if (doi!=null && doi.length()>0) { 
+    				    metadataMap.put("sourceDatasetID", doi);
     					remarks.append("in DOI=").append(doi);
     				}
-    				csvPrinter.print(remarks.toString());
+    				metadataMap.put("Modifications", "");
+    				metadataMap.put("Tests", "");
+    				//csvPrinter.print(remarks.toString());
+    				csvPrinter.print(gson.toJson(metadataMap, new TypeToken<Map<String,String>>() {}.getType()));
     			}
     			csvPrinter.println();
     			csvPrinter.flush();
